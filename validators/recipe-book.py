@@ -22,16 +22,17 @@ def wait_for_server(port=8000, timeout=30):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: recipe-book.py <workdir> <port>")
+        print("Usage: recipe-book.py <workdir> <port> [python_path]")
         sys.exit(1)
 
     workdir = sys.argv[1]
     port = int(sys.argv[2])
+    python_bin = sys.argv[3] if len(sys.argv) > 3 else sys.executable
 
-    # Démarrer l'application
-    print(f"Starting app in {workdir} on port {port}...")
+    # Démarrer l'application avec le bon interpréteur
+    print(f"Starting app in {workdir} on port {port} (python: {python_bin})...")
     proc = subprocess.Popen(
-        ["python", "main.py"],
+        [python_bin, "main.py"],
         cwd=workdir,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

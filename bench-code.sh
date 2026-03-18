@@ -82,10 +82,11 @@ get_journal() {
 
 get_code_summary() {
   local workdir="$1"
-  # Récupère les fichiers .py et .js principaux (max ~200 lignes chacun pour le judge)
+  # Récupère les fichiers source principaux (max 200 lignes chacun, hors venv)
   local out=""
   for f in "$workdir"/*.py "$workdir"/*.js "$workdir/static"/*.js "$workdir/static"/*.html "$workdir"/*.html; do
     [[ -f "$f" ]] || continue
+    [[ "$f" == *"/venv/"* ]] && continue
     local relpath="${f#$workdir/}"
     out+="### $relpath\n\`\`\`\n$(head -n 200 "$f")\n\`\`\`\n\n"
   done
@@ -262,15 +263,29 @@ for ENTRY in "${MODELS[@]}"; do
 
     log "\n▶ $MODEL_NAME / $PROMPT_NAME"
 
+    # ── Créer le venv Python et pré-installer les dépendances de base ───────
+    VENV_DIR="$MODEL_RUN_DIR/venv"
+    log "  Création du venv Python..."
+    uv venv "$VENV_DIR" --quiet
+    uv pip install --python "$VENV_DIR" fastapi uvicorn --quiet
+    VENV_PYTHON="$VENV_DIR/bin/python"
+    log "  Venv prêt : $VENV_PYTHON (fastapi, uvicorn pré-installés)"
+
     TS_START=$(date +%Y-%m-%dT%H:%M:%S)
     START_SEC=$(date +%s)
 
     [[ "${DISABLE_CACHING:-1}" == "1" ]] && export DISABLE_PROMPT_CACHING=1
 
-    # ── Construire le prompt avec le workdir injecté ────────────────────────
+    # ── Construire le prompt avec le workdir et venv injectés ────────────────
     INJECTED_PROMPT="Current working directory: ${WORKDIR}
 All files MUST be created in THIS directory using absolute paths.
 Never write to ~/.claude/ or any other directory.
+
+A Python virtual environment is ready at: ${VENV_DIR}
+Use this interpreter for everything: ${VENV_PYTHON}
+fastapi and uvicorn are already installed in this venv.
+You may install additional packages with: uv pip install --python ${VENV_PYTHON} <package>
+Do NOT use pip install --system or --break-system-packages.
 
 $(cat "$PROMPT_FILE")"
 
@@ -334,7 +349,7 @@ $(cat "$PROMPT_FILE")"
     # Note: le code est déjà dans WORKDIR car on a passé le prompt avec instructions de CWD.
     # Si pas de fichiers : le modèle n'a rien créé.
 
-    CODE_FILES=$(find "$WORKDIR" -maxdepth 3 -type f ! -name "*.pyc" ! -name "__pycache__" 2>/dev/null | wc -l | tr -d ' ')
+    CODE_FILES=$(find "$WORKDIR" -maxdepth 3 -type f ! -name "*.pyc" ! -path "*/__pycache__/*" 2>/dev/null | wc -l | tr -d ' ')
     log "  Fichiers générés: $CODE_FILES"
 
     # ── Lancer le validator ─────────────────────────────────────────────────
@@ -345,7 +360,7 @@ $(cat "$PROMPT_FILE")"
       VALIDATOR_SCRIPT="$SCRIPT_DIR/validators/${PROMPT_NAME}.sh"
       if [[ -f "$VALIDATOR_SCRIPT" ]]; then
         set +e
-        VALIDATOR_OUTPUT=$(bash "$VALIDATOR_SCRIPT" "$WORKDIR" "$PORT" 2>&1)
+        VALIDATOR_OUTPUT=$(bash "$VALIDATOR_SCRIPT" "$WORKDIR" "$PORT" "$VENV_DIR" 2>&1)
         VALIDATOR_EXIT=$?
         set -e
         if [[ "$VALIDATOR_EXIT" -eq 2 ]]; then
