@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bench-code.sh — Harness de benchmark LLM code generation
-# Usage: ./bench-code.sh [--models m1:cloud,m2:local] [--prompts recipe-book] [--max-turns 40]
+# Usage: ./bench-code.sh [--models m1:cloud,m2:local] [--prompts recipe-book] [--max-time 40]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -41,11 +41,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --models)    IFS=',' read -ra MODELS   <<< "$2"; shift 2 ;;
     --prompts)   IFS=',' read -ra PROMPTS  <<< "$2"; shift 2 ;;
-    --max-turns) MAX_TURNS="$2";                      shift 2 ;;
+    --max-time) MAX_TIME="$2";                      shift 2 ;;
     --port)      PORT="$2";                            shift 2 ;;
-    --timeout)   TIMEOUT="$2";                         shift 2 ;;
     --help|-h)
-      echo "Usage: $0 [--models m1:cloud,m2:local] [--prompts recipe-book] [--max-turns 40] [--port 8000] [--timeout 300]"
+      echo "Usage: $0 [--models m1:cloud,m2:local] [--prompts recipe-book] [--max-time 30] [--port 8000]"
       exit 0 ;;
     *) echo "Option inconnue: $1"; exit 1 ;;
   esac
@@ -105,7 +104,7 @@ write_debrief() {
   local ts_end="$5"
   local duration="$6"
   local turns_used="$7"
-  local turns_budget="$8"
+  local time_budget="$8"
   local claude_exit="$9"
   local timed_out="${10}"
   local validator_exit="${11}"
@@ -122,7 +121,7 @@ run:
   date: "$ts_start"
   prompt: "$prompt"
   model: "$model"
-  max_turns_budget: $turns_budget
+  max_time_budget: $time_budget
 
 timing:
   start: "$ts_start"
@@ -131,7 +130,7 @@ timing:
 
 execution:
   turns_used: $turns_used
-  turns_budget: $turns_budget
+  time_budget: $time_budget
   exit_code: $claude_exit
   timed_out: $timed_out
 
@@ -209,7 +208,9 @@ log ""
 log "bench-code — $(date)"
 log "Models  : ${MODELS[*]}"
 log "Prompts : ${PROMPTS[*]}"
-log "Max turns: ${MAX_TURNS} | Port: ${PORT} | Timeout: ${TIMEOUT}s"
+# Convertir MAX_TIME (minutes) → secondes pour le timeout système
+TIMEOUT_SECS=$(( MAX_TIME * 60 ))
+log "Max time : ${MAX_TIME}min (${TIMEOUT_SECS}s) | Port: ${PORT}"
 log "Results : $RUN_DIR"
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -294,14 +295,14 @@ $(cat "$PROMPT_FILE")"
     mkfifo "$CLAUDE_FIFO"
     set +e
 
+    # Note: --max-time n'existe pas dans claude --print, le budget est géré par --timeout
     if [[ -n "$TIMEOUT_CMD" ]]; then
-      (cd "$WORKDIR" && $TIMEOUT_CMD "$TIMEOUT" claude \
+      (cd "$WORKDIR" && $TIMEOUT_CMD "$TIMEOUT_SECS" claude \
         --model "$MODEL_NAME" \
         --dangerously-skip-permissions \
         --output-format stream-json \
         --verbose \
         --print \
-        --max-turns "$MAX_TURNS" \
         "$INJECTED_PROMPT") \
         > "$CLAUDE_FIFO" 2>/dev/null &
     else
@@ -311,7 +312,6 @@ $(cat "$PROMPT_FILE")"
         --output-format stream-json \
         --verbose \
         --print \
-        --max-turns "$MAX_TURNS" \
         "$INJECTED_PROMPT") \
         > "$CLAUDE_FIFO" 2>/dev/null &
     fi
@@ -412,7 +412,7 @@ $(cat "$PROMPT_FILE")"
       "$DEBRIEF" \
       "$MODEL_NAME" "$PROMPT_NAME" \
       "$TS_START" "$TS_END" "$DURATION" \
-      "$TURNS" "$MAX_TURNS" \
+      "$TURNS" "$MAX_TIME" \
       "$CLAUDE_EXIT" "$TIMED_OUT" \
       "$VALIDATOR_EXIT" "$VALIDATOR_OUTPUT" \
       "$COMPLETUDE" "$QUALITE_CODE" "$DEMARCHE" "$TOTAL" "$JUDGE_COMMENT" \
@@ -431,7 +431,7 @@ print(json.dumps({
   'prompt': '$PROMPT_NAME',
   'duration_s': $DURATION,
   'turns': '$TURNS',
-  'max_turns': $MAX_TURNS,
+  'max_time': $MAX_TIME,
   'tokens_in': '$TOKENS_IN',
   'tokens_out': '$TOKENS_OUT',
   'validator_exit': $VALIDATOR_EXIT,
@@ -484,7 +484,7 @@ try:
     verdict = val("verdict")
     turns   = val("turns_used")
     dur     = val("duration_seconds")
-    tin     = val("turns_budget")  # reuse slot for tokens_in
+    tin     = val("time_budget")  # reuse slot for tokens_in
     # parse tokens properly
     m_in  = re.search(r'tokens_in.*?(\S+)', content)
     m_out = re.search(r'tokens_out.*?(\S+)', content)

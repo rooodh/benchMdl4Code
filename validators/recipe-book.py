@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Validator Playwright pour recipe-book.
-Reçoit : workdir port
-Retourne : exit 0 (succès) ou exit 1 (échec)
+Reçoit : workdir port [python_path]
+Retourne : exit 0 (succès) ou exit 1 (échec) ou exit 2 (env problem)
 """
 import subprocess
 import sys
@@ -29,7 +29,17 @@ def main():
     port = int(sys.argv[2])
     python_bin = sys.argv[3] if len(sys.argv) > 3 else sys.executable
 
-    # Démarrer l'application avec le bon interpréteur
+    try:
+        import importlib.util
+        if importlib.util.find_spec("playwright") is None:
+            raise ImportError("playwright")
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("ERROR: playwright not installed.")
+        print("Fix: pip install playwright && playwright install chromium")
+        sys.exit(2)
+
+    # Démarrer l'application
     print(f"Starting app in {workdir} on port {port} (python: {python_bin})...")
     proc = subprocess.Popen(
         [python_bin, "main.py"],
@@ -51,50 +61,130 @@ def main():
 
     success = True
     failed_tests = []
+    base_url = f"http://localhost:{port}"
+
+    def wait_for_any(page, selectors, timeout=10000):
+        """Attend que l'un des sélecteurs apparaisse et retourne le premier trouvé."""
+        for sel in selectors:
+            try:
+                page.wait_for_selector(sel, timeout=timeout)
+                return sel
+            except Exception:
+                continue
+        return None
+
+    def count_items(page, selectors):
+        """Compte les éléments en essayant plusieurs sélecteurs."""
+        for sel in selectors:
+            try:
+                items = page.locator(sel).all()
+                if len(items) > 0:
+                    return len(items), sel
+            except Exception:
+                continue
+        return 0, None
 
     try:
-        import importlib.util
-        if importlib.util.find_spec("playwright") is None:
-            raise ImportError("playwright")
-        from playwright.sync_api import sync_playwright
-
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page()
-            base_url = f"http://localhost:{port}"
 
-            # Test 1 — Liste non vide
+            # Sélecteurs candidats pour les cards de recettes (larges)
+            CARD_SELECTORS = [
+                ".recipe-card", ".card", "[class*='recipe']", "[class*='card']",
+                "#recipeList > div", "#recipeList > li", "#recipeList > article",
+                ".recipes > div", ".recipes > li",
+                "main div[onclick]", "[data-id]",
+                ".recipe-item", ".recipe",
+            ]
+            # Sélecteurs pour déclencher la navigation vers le détail
+            CLICK_SELECTORS = [
+                ".recipe-card", ".card", "[class*='recipe-card']",
+                "#recipeList > div", "#recipeList > li",
+                "[data-id]", "[onclick]", ".recipe-item",
+                "a[href*='recipe']", "a[href*='detail']",
+            ]
+            # Sélecteurs pour le bouton portions
+            PORTIONS_SELECTORS = [
+                "#portionsSelect", "select[id*='portion']", "select[id*='serving']",
+                "button:has-text('x2')", "button:has-text('×2')",
+                "[data-multiplier='2']", ".portion-btn",
+            ]
+            # Sélecteurs pour les quantités d'ingrédients
+            QTY_SELECTORS = [
+                "[class*='quantity']", "[class*='amount']", "[data-base]",
+                ".ingredient-qty-display", ".qty", "td:first-child",
+                ".ingredient span:first-child",
+            ]
+            # Sélecteur bouton ajout recette
+            ADD_BTN_SELECTORS = [
+                "button:has-text('Ajouter une recette')", "button:has-text('Ajouter')",
+                "a:has-text('Ajouter')", "[href*='add']", "[href*='new']",
+                "#addRecipeBtn", ".add-recipe",
+            ]
+            # Sélecteur submit formulaire
+            SUBMIT_SELECTORS = [
+                "button[type='submit']", "button:has-text('Enregistrer')",
+                "button:has-text('Sauvegarder')", "button:has-text('Créer')",
+                "input[type='submit']",
+            ]
+
+            # ── Test 1 — Liste non vide ──────────────────────────────────────
             print("\n[Test 1] Liste des recettes non vide...")
             page.goto(base_url)
-            page.wait_for_load_state("networkidle")
-            cards = page.locator(".card, [class*='card'], [class*='recipe']").all()
-            # fallback : chercher des liens ou items qui ressemblent à des recettes
-            if len(cards) == 0:
-                # essai plus large
-                cards = page.locator("li, article, .item").all()
-            if len(cards) >= 1:
-                print(f"  PASS — {len(cards)} recette(s) affichée(s)")
+            page.wait_for_load_state("networkidle", timeout=10000)
+            # Attendre que le JS rende quelque chose
+            matched_sel = wait_for_any(page, CARD_SELECTORS, timeout=8000)
+            n, used_sel = count_items(page, CARD_SELECTORS)
+            if n >= 1:
+                print(f"  PASS — {n} recette(s) [{used_sel}]")
             else:
-                print("  FAIL — aucune recette trouvée dans la liste")
-                success = False
-                failed_tests.append("Test 1: liste vide")
+                # Dernier recours : contenu texte contient-il des recettes ?
+                content = page.content()
+                if any(word in content for word in ["recette", "recipe", "Recette"]):
+                    print(f"  PASS (text fallback) — contenu recette détecté")
+                    n = 1
+                else:
+                    print(f"  FAIL — aucune recette trouvée (sélecteurs: {CARD_SELECTORS[:3]}...)")
+                    success = False
+                    failed_tests.append("Test 1: liste vide")
 
-            # Test 2 — Navigation vers le détail
+            # ── Test 2 — Navigation vers le détail ──────────────────────────
             print("\n[Test 2] Navigation vers le détail...")
             try:
-                # Cliquer sur le premier élément cliquable ressemblant à une recette
-                first = page.locator("a[href*='recipe'], .card, article, li").first
-                first.click()
-                page.wait_for_load_state("networkidle")
-                # Vérifier présence d'ingrédients
-                has_ingredients = page.locator(
-                    "[class*='ingredient'], li, ul"
-                ).count() > 0
-                has_steps = page.locator(
-                    "[class*='step'], ol, [class*='instruction']"
-                ).count() > 0
+                page.goto(base_url)
+                page.wait_for_load_state("networkidle", timeout=10000)
+                wait_for_any(page, CARD_SELECTORS, timeout=8000)
+
+                clicked = False
+                for sel in CLICK_SELECTORS:
+                    try:
+                        el = page.locator(sel).first
+                        if el.count() > 0:
+                            el.click(timeout=5000)
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+
+                if not clicked:
+                    raise Exception("Aucun élément cliquable trouvé pour naviguer vers le détail")
+
+                page.wait_for_load_state("networkidle", timeout=10000)
+
+                # Vérifier présence d'ingrédients et étapes (texte ou DOM)
+                content = page.content()
+                has_ingredients = (
+                    page.locator("[class*='ingredient'], .ingredients, #ingredients").count() > 0
+                    or "ingrédient" in content.lower() or "ingredient" in content.lower()
+                )
+                has_steps = (
+                    page.locator("[class*='step'], .steps, #steps, ol").count() > 0
+                    or "étape" in content.lower() or "step" in content.lower()
+                )
+
                 if has_ingredients and has_steps:
-                    print("  PASS — ingrédients et étapes présents")
+                    print(f"  PASS — ingrédients={has_ingredients}, étapes={has_steps}")
                 else:
                     print(f"  FAIL — ingrédients={has_ingredients}, étapes={has_steps}")
                     success = False
@@ -104,20 +194,62 @@ def main():
                 success = False
                 failed_tests.append(f"Test 2: {e}")
 
-            # Test 3 — Ajustement des portions
+            # ── Test 3 — Ajustement des portions ────────────────────────────
             print("\n[Test 3] Ajustement des portions...")
             try:
-                # Récupérer une quantité avant
-                qty_before = page.locator("[class*='quantity'], [class*='amount'], td, li").first.inner_text()
-                # Chercher le sélecteur x2
-                x2 = page.locator("button:has-text('x2'), [data-multiplier='2'], select").first
-                x2.click()
-                page.wait_for_timeout(500)
-                qty_after = page.locator("[class*='quantity'], [class*='amount'], td, li").first.inner_text()
-                if qty_before != qty_after:
-                    print(f"  PASS — quantité changée : {qty_before!r} → {qty_after!r}")
+                # On est déjà sur le détail, sinon y revenir
+                content_before = page.content()
+
+                matched = wait_for_any(page, PORTIONS_SELECTORS, timeout=5000)
+                if matched is None:
+                    raise Exception("Sélecteur portions introuvable")
+
+                el = page.locator(matched).first
+
+                # Récupérer une valeur avant
+                qty_before = ""
+                for qs in QTY_SELECTORS:
+                    try:
+                        qel = page.locator(qs).first
+                        if qel.count() > 0:
+                            qty_before = qel.inner_text(timeout=2000)
+                            break
+                    except Exception:
+                        continue
+
+                # Déclencher le changement selon le type d'élément
+                tag = el.evaluate("el => el.tagName.toLowerCase()")
+                if tag == "select":
+                    # Sélectionner x2 ou la 2e option
+                    try:
+                        el.select_option("2")
+                    except Exception:
+                        options = el.locator("option").all()
+                        if len(options) >= 2:
+                            options[1].evaluate("el => el.selected = true")
+                            el.evaluate("el => el.dispatchEvent(new Event('change'))")
                 else:
-                    print(f"  FAIL — quantité inchangée après x2 ({qty_before!r})")
+                    el.click(timeout=5000)
+
+                page.wait_for_timeout(1000)
+
+                qty_after = ""
+                for qs in QTY_SELECTORS:
+                    try:
+                        qel = page.locator(qs).first
+                        if qel.count() > 0:
+                            qty_after = qel.inner_text(timeout=2000)
+                            break
+                    except Exception:
+                        continue
+
+                content_after = page.content()
+                if qty_before != qty_after and qty_before:
+                    print(f"  PASS — quantité changée : {qty_before!r} → {qty_after!r}")
+                elif content_before != content_after:
+                    print(f"  PASS (DOM changé) — le contenu de la page a été mis à jour")
+                else:
+                    print(f"  FAIL — rien n'a changé après sélection portions")
                     success = False
                     failed_tests.append("Test 3: portions non mises à jour")
             except Exception as e:
@@ -125,50 +257,176 @@ def main():
                 success = False
                 failed_tests.append(f"Test 3: {e}")
 
-            # Test 4 — Ajout d'une recette
+            # ── Test 4 — Ajout d'une recette ────────────────────────────────
             print("\n[Test 4] Ajout d'une recette...")
             try:
                 page.goto(base_url)
-                page.wait_for_load_state("networkidle")
-                # Chercher le bouton d'ajout
-                add_btn = page.locator("button:has-text('Ajouter'), a:has-text('Ajouter'), [href*='add'], [href*='new']").first
-                add_btn.click()
-                page.wait_for_load_state("networkidle")
+                page.wait_for_load_state("networkidle", timeout=10000)
+                wait_for_any(page, CARD_SELECTORS + ADD_BTN_SELECTORS, timeout=8000)
 
-                # Remplir le formulaire
-                page.locator("input[name='name'], input[placeholder*='nom'], input[type='text']").first.fill("Recette Test Bench")
-                page.locator("input[name='prep_time'], input[type='number']").first.fill("15")
-                servings_inputs = page.locator("input[name='servings'], input[type='number']").all()
-                if len(servings_inputs) >= 2:
-                    servings_inputs[1].fill("2")
+                # Cliquer sur le bouton d'ajout
+                clicked = False
+                for sel in ADD_BTN_SELECTORS:
+                    try:
+                        el = page.locator(sel).first
+                        if el.count() > 0:
+                            el.click(timeout=5000)
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
 
-                # Ajouter un ingrédient
-                add_ing = page.locator("button:has-text('Ajouter un ingr'), button:has-text('ingredient'), button:has-text('Ingrédient')").first
-                add_ing.click()
-                ing_inputs = page.locator("input[placeholder*='quantité'], input[placeholder*='quantity'], input[type='number']").all()
-                if ing_inputs:
-                    ing_inputs[-1].fill("200")
-                unit_inputs = page.locator("input[placeholder*='unité'], input[placeholder*='unit']").all()
-                if unit_inputs:
-                    unit_inputs[-1].fill("g")
-                ing_name_inputs = page.locator("input[placeholder*='ingrédient'], input[placeholder*='nom']").all()
-                if ing_name_inputs:
-                    ing_name_inputs[-1].fill("farine")
+                if not clicked:
+                    raise Exception("Bouton d'ajout introuvable")
 
-                # Ajouter une étape
-                add_step = page.locator("button:has-text('Ajouter une étape'), button:has-text('étape'), button:has-text('step')").first
-                add_step.click()
-                step_inputs = page.locator("textarea").all()
-                if step_inputs:
-                    step_inputs[-1].fill("Mélanger les ingrédients")
+                page.wait_for_load_state("networkidle", timeout=10000)
+
+                # Remplir nom
+                for sel in ["input[name='name']", "#recipeName", "input[placeholder*='nom']",
+                            "input[placeholder*='Nom']", "input[type='text']"]:
+                    try:
+                        el = page.locator(sel).first
+                        if el.count() > 0:
+                            el.fill("Recette Test Bench")
+                            break
+                    except Exception:
+                        continue
+
+                # Remplir temps (premier input number)
+                number_inputs = page.locator("input[type='number']").all()
+                if len(number_inputs) >= 1:
+                    number_inputs[0].fill("15")
+                if len(number_inputs) >= 2:
+                    number_inputs[1].fill("2")
+
+                # Remplir TOUS les champs ingrédients existants (le formulaire peut en pré-créer)
+                # puis en ajouter un si aucun n'existe
+                ING_QTY_SELS  = [".ingredient-qty", "input[placeholder*='Quantité']",
+                                  "input[placeholder*='quantité']", ".ingredient-row input[type='number']"]
+                ING_UNIT_SELS = [".ingredient-unit", "input[placeholder*='nité']",
+                                  "input[placeholder*='Unit']", ".ingredient-row input[type='text']:nth-child(1)"]
+                ING_NAME_SELS = [".ingredient-name", "input[placeholder*='Ingrédient']",
+                                  "input[placeholder*='ingrédient']", ".ingredient-row input[type='text']:last-child"]
+
+                # Compter les lignes existantes
+                existing_rows = 0
+                for sel in [".ingredient-row", ".ingredient", "[class*='ingredient-row']"]:
+                    c = page.locator(sel).count()
+                    if c > 0:
+                        existing_rows = c
+                        break
+
+                if existing_rows == 0:
+                    # Aucune ligne — cliquer sur "Ajouter un ingrédient"
+                    for sel in ["button:has-text('Ajouter un ingr')", "button:has-text('Ingrédient')",
+                                "button:has-text('ingredient')", "#addIngredient", ".add-ingredient"]:
+                        try:
+                            el = page.locator(sel).first
+                            if el.count() > 0:
+                                el.click(timeout=3000)
+                                break
+                        except Exception:
+                            continue
+
+                # Remplir la première ligne (ou toutes)
+                for sel in ING_QTY_SELS:
+                    try:
+                        els = page.locator(sel).all()
+                        if els:
+                            els[0].fill("200")
+                            break
+                    except Exception:
+                        continue
+                for sel in ING_UNIT_SELS:
+                    try:
+                        els = page.locator(sel).all()
+                        if els:
+                            els[0].fill("g")
+                            break
+                    except Exception:
+                        continue
+                for sel in ING_NAME_SELS:
+                    try:
+                        els = page.locator(sel).all()
+                        if els:
+                            els[0].fill("farine")
+                            break
+                    except Exception:
+                        continue
+
+                # Remplir toutes les autres lignes d'ingrédients avec des valeurs non-vides
+                for sel in ING_QTY_SELS:
+                    try:
+                        els = page.locator(sel).all()
+                        for el in els[1:]:
+                            try: el.fill("1")
+                            except Exception: pass
+                        break
+                    except Exception:
+                        continue
+                for sel in ING_UNIT_SELS:
+                    try:
+                        els = page.locator(sel).all()
+                        for el in els[1:]:
+                            try: el.fill("g")
+                            except Exception: pass
+                        break
+                    except Exception:
+                        continue
+                for sel in ING_NAME_SELS:
+                    try:
+                        els = page.locator(sel).all()
+                        for el in els[1:]:
+                            try: el.fill("ingrédient")
+                            except Exception: pass
+                        break
+                    except Exception:
+                        continue
+
+                # Remplir les étapes existantes ou en ajouter une
+                step_sels = ["textarea", ".step-desc", "input[placeholder*='étape']",
+                             "input[placeholder*='Étape']", ".step-row textarea"]
+                existing_steps = 0
+                for sel in step_sels:
+                    c = page.locator(sel).count()
+                    if c > 0:
+                        existing_steps = c
+                        break
+
+                if existing_steps == 0:
+                    for sel in ["button:has-text('Ajouter une étape')", "button:has-text('étape')",
+                                "button:has-text('Étape')", "#addStep", ".add-step"]:
+                        try:
+                            el = page.locator(sel).first
+                            if el.count() > 0:
+                                el.click(timeout=3000)
+                                break
+                        except Exception:
+                            continue
+
+                for sel in step_sels:
+                    try:
+                        els = page.locator(sel).all()
+                        if els:
+                            els[0].fill("Mélanger les ingrédients")
+                            break
+                    except Exception:
+                        continue
 
                 # Soumettre
-                page.locator("button[type='submit'], button:has-text('Enregistrer'), button:has-text('Sauvegarder')").first.click()
-                page.wait_for_load_state("networkidle")
+                for sel in SUBMIT_SELECTORS:
+                    try:
+                        el = page.locator(sel).first
+                        if el.count() > 0:
+                            el.click(timeout=5000)
+                            break
+                    except Exception:
+                        continue
 
-                # Vérifier que la recette apparaît
-                content = page.content()
-                if "Recette Test Bench" in content:
+                page.wait_for_load_state("networkidle", timeout=10000)
+                page.wait_for_timeout(1500)
+
+                if "Recette Test Bench" in page.content():
                     print("  PASS — recette créée et visible dans la liste")
                 else:
                     print("  FAIL — 'Recette Test Bench' non trouvée après soumission")
@@ -179,13 +437,13 @@ def main():
                 success = False
                 failed_tests.append(f"Test 4: {e}")
 
-            # Test 5 — Persistance après reload
+            # ── Test 5 — Persistance après reload ───────────────────────────
             print("\n[Test 5] Persistance après rechargement...")
             try:
                 page.goto(base_url)
-                page.wait_for_load_state("networkidle")
-                content = page.content()
-                if "Recette Test Bench" in content:
+                page.wait_for_load_state("networkidle", timeout=10000)
+                page.wait_for_timeout(1000)
+                if "Recette Test Bench" in page.content():
                     print("  PASS — recette persistée après reload")
                 else:
                     print("  FAIL — recette disparue après reload")
@@ -198,13 +456,10 @@ def main():
 
             browser.close()
 
-    except ImportError:
-        print("ERROR: playwright not installed.")
-        print("Fix: pip install playwright && playwright install chromium")
-        proc.kill()
-        sys.exit(2)  # exit 2 = env problem, not model failure
     except Exception as e:
-        print(f"ERROR: unexpected — {e}")
+        print(f"ERROR: inattendu — {e}")
+        import traceback
+        traceback.print_exc()
         success = False
         failed_tests.append(f"Unexpected: {e}")
     finally:

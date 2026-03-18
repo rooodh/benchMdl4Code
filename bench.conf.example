@@ -27,9 +27,8 @@ PROMPTS=(
 # =============================================================================
 # BENCHMARK SETTINGS
 # =============================================================================
-MAX_TURNS=40          # budget dur de turns Claude Code
+MAX_TIME=30           # temps max alloué au LLM par run, en minutes (converti en secondes)
 PORT=8000             # port sur lequel l'app générée doit écouter
-TIMEOUT=300           # timeout global en secondes par run (kill si dépassé)
 DISABLE_CACHING=1     # 1 = désactiver le prompt caching Anthropic (comparaison équitable)
 
 # =============================================================================
