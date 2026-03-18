@@ -188,10 +188,17 @@ run_judge() {
 
 parse_scores() {
   local analysis="$1"
-  # Extrait le bloc <!-- SCORES ... -->
+  # Extrait la ligne de données dans le bloc <!-- SCORES ... -->
   local scores_block
-  scores_block=$(echo "$analysis" | sed -n '/<!-- SCORES/,/-->/p' | grep -v '<!--' | grep -v '-->' | head -2 | tail -1)
-  # Format: completude|qualite_code|demarche|total|comment
+  scores_block=$(echo "$analysis" | python3 -c "
+import sys, re
+content = sys.stdin.read()
+m = re.search(r'<!-- SCORES\n.*?\n(.+?)\n-->', content, re.DOTALL)
+if m:
+    # Prendre la dernière ligne non-vide avant -->
+    lines = [l for l in m.group(0).split('\n') if l.strip() and 'SCORES' not in l and '-->' not in l and '<!--' not in l]
+    print(lines[-1] if lines else '')
+" 2>/dev/null)
   IFS='|' read -r completude qualite_code demarche total judge_comment <<< "$scores_block"
   echo "${completude:-0} ${qualite_code:-0} ${demarche:-0} ${total:-0} ${judge_comment:-N/A}"
 }
@@ -341,7 +348,12 @@ $(cat "$PROMPT_FILE")"
         VALIDATOR_OUTPUT=$(bash "$VALIDATOR_SCRIPT" "$WORKDIR" "$PORT" 2>&1)
         VALIDATOR_EXIT=$?
         set -e
-        log "  Validator exit=${VALIDATOR_EXIT}"
+        if [[ "$VALIDATOR_EXIT" -eq 2 ]]; then
+          log "  ${RED}Validator: problème d'environnement (exit 2) — installer les dépendances${NC}"
+          log "  ${YELLOW}Run: pip install playwright && playwright install chromium${NC}"
+        else
+          log "  Validator exit=${VALIDATOR_EXIT}"
+        fi
       else
         VALIDATOR_OUTPUT="Validator introuvable: $VALIDATOR_SCRIPT"
         log "  ${RED}Validator introuvable${NC}"

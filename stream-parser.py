@@ -8,12 +8,18 @@ Affiche la progression en temps réel sur stderr (visible dans le terminal).
 import sys
 import json
 import os
+import time
 
 trace_path = sys.argv[1]
 tokens_path = sys.argv[2]
 
 input_tokens = output_tokens = num_turns = "?"
 turn_count = 0
+start_time = time.time()
+
+def elapsed():
+    s = int(time.time() - start_time)
+    return f"{s//60:02d}:{s%60:02d}"
 
 with open(trace_path, "w") as trace:
     for line in sys.stdin:
@@ -41,13 +47,12 @@ with open(trace_path, "w") as trace:
                             desc = str(inp["path"])
                         elif "pattern" in inp:
                             desc = str(inp["pattern"])[:60]
-                        print(f"  [{turn_count:>2}] {tool:<12} {desc}", flush=True)
+                        print(f"  {elapsed()} [{turn_count:>2}] {tool:<12} {desc}", flush=True)
                     elif block.get("type") == "text":
                         text = block.get("text", "").strip()
                         if text:
-                            # Première ligne du texte seulement
                             first_line = text.split("\n")[0][:80]
-                            print(f"  [{turn_count:>2}] thinking    {first_line}", flush=True)
+                            print(f"  {elapsed()} [{turn_count:>2}] thinking    {first_line}", flush=True)
 
             elif t == "result":
                 u = d.get("usage", {})

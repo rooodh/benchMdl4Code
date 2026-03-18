@@ -30,27 +30,26 @@ ${CODE_CONTENT}
 
 Évalue selon ces 3 dimensions :
 
-**Complétude /20** : Le LLM a-t-il couvert toutes les fonctionnalités demandées dans le brief ? (liste, détail, ajout, suppression, recherche, portions dynamiques, seed data)
+**Complétude /20** : Le LLM a-t-il couvert toutes les fonctionnalités demandées dans le brief ? (liste, détail, ajout, suppression, recherche, portions dynamiques, seed data). Si le validator a échoué (exit 1) à cause d'un problème d'environnement (ex: playwright absent), évalue le code directement.
 
 **Qualité code /20** : Le code est-il lisible, structuré, sans antipatterns évidents ? L'architecture est-elle cohérente avec la stack demandée (FastAPI, SQLite, JS vanilla) ?
 
-**Démarche /20** : Le JOURNAL.md montre-t-il une progression logique ? Le LLM a-t-il anticipé les problèmes, corrigé ses erreurs, fait une auto-évaluation honnête ?
+**Démarche /20** : Le JOURNAL.md montre-t-il une progression logique ? Le LLM a-t-il anticipé les problèmes, corrigé ses erreurs, fait une auto-évaluation honnête ? Si JOURNAL.md est absent : 0.
 
-Si JOURNAL.md est absent, la dimension Démarche est notée 0.
-Si le validator a échoué (exit 1), pénaliser Complétude proportionnellement aux tests ratés.
+**Total /20** : moyenne arrondie des 3 dimensions. IMPORTANT : chaque dimension est sur 20, le total est aussi sur 20. Formule : round((complétude + qualité_code + démarche) / 3).
 
 ## Format de sortie
 
-Produis exactement ce bloc (pas d'autre texte autour) :
+Produis exactement ce bloc markdown :
 
 | Dimension | Note /20 | Commentaire (max 80 chars) |
 |---|---|---|
 | Complétude | X | ... |
 | Qualité code | X | ... |
 | Démarche | X | ... |
-| **Total** | **X** | ... |
+| **Total** | **X** | moyenne des 3 |
 
-Puis ce bloc machine-readable :
+Puis ce bloc machine-readable (OBLIGATOIRE, exactement ce format) :
 
 <!-- SCORES
 completude|qualite_code|demarche|total|comment

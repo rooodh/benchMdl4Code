@@ -52,6 +52,9 @@ def main():
     failed_tests = []
 
     try:
+        import importlib.util
+        if importlib.util.find_spec("playwright") is None:
+            raise ImportError("playwright")
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as p:
@@ -195,9 +198,10 @@ def main():
             browser.close()
 
     except ImportError:
-        print("ERROR: playwright not installed. Run: pip install playwright && playwright install chromium")
+        print("ERROR: playwright not installed.")
+        print("Fix: pip install playwright && playwright install chromium")
         proc.kill()
-        sys.exit(1)
+        sys.exit(2)  # exit 2 = env problem, not model failure
     except Exception as e:
         print(f"ERROR: unexpected — {e}")
         success = False
