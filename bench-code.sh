@@ -296,54 +296,7 @@ $(cat "$PROMPT_FILE")"
     CLAUDE_PID=$!
 
     # Parser le stream-json pour extraire turns/tokens
-    TOKENS_FILE="$TOKENS_FILE" python3 - "$TRACE_LOG" < "$CLAUDE_FIFO" <<'PYEOF'
-import sys, json, os
-
-trace_path = sys.argv[1]
-tokens_path = os.environ.get("TOKENS_FILE", "/tmp/tokens.txt")
-
-input_tokens = output_tokens = num_turns = "?"
-turn_count = 0
-
-with open(trace_path, "w") as trace:
-    for line in sys.stdin:
-        raw = line.rstrip("\n")
-        if not raw:
-            continue
-        trace.write(raw + "\n")
-        trace.flush()
-        try:
-            d = json.loads(raw)
-            t = d.get("type", "")
-
-            if t == "assistant":
-                turn_count += 1
-                # Afficher les tool_use en cours
-                for block in d.get("message", {}).get("content", []):
-                    if block.get("type") == "tool_use":
-                        tool = block.get("name", "?")
-                        inp  = block.get("input", {})
-                        desc = ""
-                        if "command" in inp:
-                            desc = inp["command"][:80]
-                        elif "file_path" in inp:
-                            desc = inp["file_path"]
-                        elif "path" in inp:
-                            desc = inp["path"]
-                        print(f"  [{turn_count}] {tool}: {desc}", flush=True)
-
-            elif t == "result":
-                u = d.get("usage", {})
-                input_tokens  = u.get("input_tokens", "?")
-                output_tokens = u.get("output_tokens", "?")
-                num_turns     = d.get("num_turns", "?")
-
-        except Exception:
-            pass
-
-with open(tokens_path, "w") as f:
-    f.write(f"{input_tokens} {output_tokens} {num_turns}\n")
-PYEOF
+    python3 "$SCRIPT_DIR/stream-parser.py" "$TRACE_LOG" "$TOKENS_FILE" < "$CLAUDE_FIFO"
 
     wait "$CLAUDE_PID"
     CLAUDE_EXIT=$?
