@@ -105,23 +105,25 @@ write_debrief() {
   local duration="$6"
   local turns_used="$7"
   local time_budget="$8"
-  local claude_exit="$9"
-  local timed_out="${10}"
-  local validator_exit="${11}"
-  local validator_output="${12}"
-  local completude="${13}"
-  local qualite_code="${14}"
-  local demarche="${15}"
-  local total="${16}"
-  local judge_comment="${17}"
-  local verdict="${18}"
+  local tokens_in="$9"
+  local tokens_out="${10}"
+  local claude_exit="${11}"
+  local timed_out="${12}"
+  local validator_exit="${13}"
+  local validator_output="${14}"
+  local completude="${15}"
+  local qualite_code="${16}"
+  local demarche="${17}"
+  local total="${18}"
+  local judge_comment="${19}"
+  local verdict="${20}"
 
   cat > "$outfile" <<EOF
 run:
   date: "$ts_start"
   prompt: "$prompt"
   model: "$model"
-  max_time_budget: $time_budget
+  max_time_budget_min: $time_budget
 
 timing:
   start: "$ts_start"
@@ -130,7 +132,8 @@ timing:
 
 execution:
   turns_used: $turns_used
-  time_budget: $time_budget
+  tokens_in: $tokens_in
+  tokens_out: $tokens_out
   exit_code: $claude_exit
   timed_out: $timed_out
 
@@ -413,6 +416,7 @@ $(cat "$PROMPT_FILE")"
       "$MODEL_NAME" "$PROMPT_NAME" \
       "$TS_START" "$TS_END" "$DURATION" \
       "$TURNS" "$MAX_TIME" \
+      "$TOKENS_IN" "$TOKENS_OUT" \
       "$CLAUDE_EXIT" "$TIMED_OUT" \
       "$VALIDATOR_EXIT" "$VALIDATOR_OUTPUT" \
       "$COMPLETUDE" "$QUALITE_CODE" "$DEMARCHE" "$TOTAL" "$JUDGE_COMMENT" \
@@ -474,25 +478,21 @@ for ENTRY in "${MODELS[@]}"; do
     DEBRIEF="$RUN_DIR/$RUN_NAME/debrief.yaml"
     if [[ -f "$DEBRIEF" ]]; then
       python3 - "$DEBRIEF" "$RUN_NAME" <<'PYEOF' | tee -a "$LOG_FILE"
-import sys
+import sys, re
 try:
-    import re
     content = open(sys.argv[1]).read()
-    def val(key):
-        m = re.search(rf'^  {key}:\s*(.+)$', content, re.MULTILINE)
+    def val(key, indent=r'\s*'):
+        # Cherche la clé avec n'importe quelle indentation
+        m = re.search(rf'^{indent}{re.escape(key)}:\s*(.+)$', content, re.MULTILINE)
         return m.group(1).strip().strip('"') if m else "?"
-    verdict = val("verdict")
+    verdict = val("verdict", indent=r'')   # racine, 0 indentation
     turns   = val("turns_used")
     dur     = val("duration_seconds")
-    tin     = val("time_budget")  # reuse slot for tokens_in
-    # parse tokens properly
-    m_in  = re.search(r'tokens_in.*?(\S+)', content)
-    m_out = re.search(r'tokens_out.*?(\S+)', content)
-    tin   = m_in.group(1)  if m_in  else "?"
-    tout  = m_out.group(1) if m_out else "?"
-    total = val("total")
-    v_ok  = val("success")
-    print(f"{sys.argv[2]:<45} {verdict:<8} {turns:<7} {dur:<8} {tin:<10} {tout:<10} {total:<10} {v_ok:<8}")
+    tin     = val("tokens_in")
+    tout    = val("tokens_out")
+    total   = val("total")
+    v_ok    = val("success")
+    print(f"{sys.argv[2]:<45} {verdict:<20} {turns:<7} {dur:<8} {tin:<10} {tout:<10} {total:<10} {v_ok:<8}")
 except Exception as e:
     print(f"{sys.argv[2]:<45} ERROR: {e}")
 PYEOF
