@@ -1,0 +1,18 @@
+bench.conf
+
+# Workspaces (code généré — jetable)
+results/runs/*/workspace/
+
+# Logs et tokens intermédiaires
+results/runs/*/tokens.txt
+results/runs/*/*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# macOS
+.DS_Store

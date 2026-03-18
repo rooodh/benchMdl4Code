@@ -1,0 +1,41 @@
+# bench.conf — Benchmark configuration
+# Copy this file to bench.conf and edit to your needs.
+# bench.conf is gitignored (your local config stays private).
+
+# =============================================================================
+# MODELS
+# Format: "model-name:cloud" or "model-name:local"
+#   cloud  → uses Anthropic API (requires ANTHROPIC_API_KEY env var)
+#   local  → uses LM Studio at http://127.0.0.1:1234 (requires lms CLI)
+# =============================================================================
+MODELS=(
+  "claude-haiku-4-5-20251001:cloud"
+  # "claude-sonnet-4-6:cloud"
+  # "mlx-community/qwen3.5-35b-a3b:local"
+  # "qwen3.5-9b:local"
+)
+
+# =============================================================================
+# PROMPTS
+# List of prompt filenames (without path) to run.
+# Each must match a file in prompts/<name>.md
+# =============================================================================
+PROMPTS=(
+  "recipe-book"
+)
+
+# =============================================================================
+# BENCHMARK SETTINGS
+# =============================================================================
+MAX_TURNS=40          # budget dur de turns Claude Code
+PORT=8000             # port sur lequel l'app générée doit écouter
+TIMEOUT=300           # timeout global en secondes par run (kill si dépassé)
+DISABLE_CACHING=1     # 1 = désactiver le prompt caching Anthropic (comparaison équitable)
+
+# =============================================================================
+# ANALYSIS MODEL
+# Model used as LLM judge at the end of each run.
+# Must be a cloud model. Set to "" to skip analysis.
+# Judges: JOURNAL.md + code generated + validator output → scores /20
+# =============================================================================
+MODEL_ANALYZE="claude-haiku-4-5-20251001:cloud"
