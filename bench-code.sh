@@ -117,6 +117,18 @@ write_debrief() {
   local total="${18}"
   local judge_comment="${19}"
   local verdict="${20}"
+  local model_info_json="${21:-{}}"
+
+  local mi_arch mi_params mi_quant mi_ctx mi_max_ctx mi_size mi_fmt mi_vision mi_tool
+  mi_arch=$(echo "$model_info_json"    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('architecture','?'))" 2>/dev/null || echo "?")
+  mi_params=$(echo "$model_info_json"  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('params','?'))" 2>/dev/null || echo "?")
+  mi_quant=$(echo "$model_info_json"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('quantization','?'))" 2>/dev/null || echo "?")
+  mi_ctx=$(echo "$model_info_json"     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('context_length','?'))" 2>/dev/null || echo "?")
+  mi_max_ctx=$(echo "$model_info_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('max_context_length','?'))" 2>/dev/null || echo "?")
+  mi_size=$(echo "$model_info_json"    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('size_bytes','?'))" 2>/dev/null || echo "?")
+  mi_fmt=$(echo "$model_info_json"     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('format','?'))" 2>/dev/null || echo "?")
+  mi_vision=$(echo "$model_info_json"  | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d.get('vision',False)).lower())" 2>/dev/null || echo "?")
+  mi_tool=$(echo "$model_info_json"    | python3 -c "import sys,json; d=json.load(sys.stdin); print(str(d.get('tool_use',False)).lower())" 2>/dev/null || echo "?")
 
   cat > "$outfile" <<EOF
 run:
@@ -124,6 +136,17 @@ run:
   prompt: "$prompt"
   model: "$model"
   max_time_budget_min: $time_budget
+
+model_info:
+  architecture: "$mi_arch"
+  params: "$mi_params"
+  quantization: "$mi_quant"
+  format: "$mi_fmt"
+  context_length: $mi_ctx
+  max_context_length: $mi_max_ctx
+  size_bytes: $mi_size
+  vision: $mi_vision
+  tool_use: $mi_tool
 
 timing:
   start: "$ts_start"
@@ -226,6 +249,8 @@ for ENTRY in "${MODELS[@]}"; do
   [[ "$QUIT_REQUESTED" -eq 1 ]] && break
 
   # Setup modèle local
+  MODEL_INFO_JSON="{}"
+
   if [[ "$MODEL_TYPE" == "local" ]]; then
     log "\n${YELLOW}=== $MODEL_NAME (local) ===${NC}"
     if ! lms ls 2>/dev/null | grep -q "$MODEL_NAME"; then
@@ -238,6 +263,22 @@ for ENTRY in "${MODELS[@]}"; do
       continue
     fi
     sleep 5
+    MODEL_INFO_JSON=$(lms ps --json 2>/dev/null | python3 -c "
+import sys, json
+models = json.load(sys.stdin)
+m = next((x for x in models if '$MODEL_NAME' in x.get('identifier','') or '$MODEL_NAME' in x.get('modelKey','')), models[0] if models else {})
+print(json.dumps({
+  'architecture': m.get('architecture','?'),
+  'params':       m.get('paramsString','?'),
+  'quantization': m.get('quantization',{}).get('name','?') if isinstance(m.get('quantization'),dict) else str(m.get('quantization','?')),
+  'context_length': m.get('contextLength','?'),
+  'max_context_length': m.get('maxContextLength','?'),
+  'size_bytes':   m.get('sizeBytes','?'),
+  'format':       m.get('format','?'),
+  'vision':       m.get('vision', False),
+  'tool_use':     m.get('trainedForToolUse', False),
+}))
+" 2>/dev/null || echo "{}")
     export ANTHROPIC_BASE_URL="http://127.0.0.1:1234"
     export ANTHROPIC_API_KEY="lm-studio"
   else
@@ -420,14 +461,15 @@ $(cat "$PROMPT_FILE")"
       "$CLAUDE_EXIT" "$TIMED_OUT" \
       "$VALIDATOR_EXIT" "$VALIDATOR_OUTPUT" \
       "$COMPLETUDE" "$QUALITE_CODE" "$DEMARCHE" "$TOTAL" "$JUDGE_COMMENT" \
-      "$VERDICT"
+      "$VERDICT" "$MODEL_INFO_JSON"
 
     log "  debrief.yaml → $DEBRIEF"
 
     # ── Append history.jsonl ───────────────────────────────────────────────
     python3 -c "
 import json
-print(json.dumps({
+model_info = json.loads('''$MODEL_INFO_JSON''') if '''$MODEL_INFO_JSON''' != '{}' else {}
+record = {
   'date': '$TS_START',
   'run': '$TIMESTAMP',
   'model': '$MODEL_NAME',
@@ -443,8 +485,11 @@ print(json.dumps({
   'qualite_code': $QUALITE_CODE,
   'demarche': $DEMARCHE,
   'total': $TOTAL,
-  'verdict': '$VERDICT'
-}))
+  'verdict': '$VERDICT',
+}
+if model_info:
+    record['model_info'] = model_info
+print(json.dumps(record))
 " >> "$SCRIPT_DIR/history.jsonl"
 
     # ── Résumé ligne ───────────────────────────────────────────────────────

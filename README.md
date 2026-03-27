@@ -105,3 +105,54 @@ Ce journal est lu par le LLM judge pour noter la démarche (`demarche /20`).
 
 - **Cloud** : `model-id:cloud` — utilise l'API Anthropic (`ANTHROPIC_API_KEY`)
 - **Local** : `model-id:local` — utilise LM Studio (`lms` CLI, `http://127.0.0.1:1234`)
+
+## Prérequis — Optimisation des modèles pour le codage
+
+Pour que le benchmark soit équitable et que les modèles locaux performent à leur meilleur niveau, ils doivent être configurés de façon optimale pour le codage avant de lancer un run.
+
+### Paramètres de génération recommandés
+
+Valeurs issues de la documentation Unsloth pour Qwen3.5, **mode non-thinking** (défaut pour le benchmark) :
+
+| Paramètre | Valeur | Justification |
+|---|---|---|
+| `temperature` | **0.7** | Recommandé par Unsloth pour le mode instruct/non-thinking. |
+| `top_p` | 0.8 | |
+| `top_k` | **20** | Unsloth recommande 20, non 40 ou 64. |
+| `min_p` | **0.0** | Unsloth recommande 0.0. |
+| `presence_penalty` | 1.5 | Réduit les répétitions en mode non-thinking. |
+| `repeat_penalty` | 1.0 | Désactivé ou 1.0. |
+| `context_length` | max du modèle | Le codage multi-fichiers nécessite tout le contexte disponible. |
+
+> **Pourquoi non-thinking par défaut** : le mode thinking consomme de la fenêtre de contexte et ralentit chaque turn, ce qui pénalise `duration_seconds` et risque de déclencher des timeouts. Le benchmark est multi-turn (40 turns) — le modèle itère et corrige sans besoin de thinking explicite. Le mode thinking peut être testé séparément comme axe de comparaison.
+>
+> Sur les modèles Qwen3.5 27B+, le thinking est **activé par défaut** — le désactiver explicitement via `--chat-template-kwargs '{"enable_thinking":false}'`.
+
+### Optimisation du contexte et de la quantisation
+
+- Charger le modèle avec la **fenêtre de contexte maximale** supportée par la VRAM disponible (Qwen3.5 supporte jusqu'à 256K tokens natifs, 1M via YaRN).
+- Préférer la quantisation **`UD-Q4_K_XL`** (Unsloth Dynamic 2.0 — couches critiques upcasted en 8/16-bit) plutôt que Q2/Q3 qui dégradent la qualité du code généré.
+
+### Configuration dans LM Studio
+
+Pour chaque modèle local benchmarké, appliquer avant le run :
+
+```
+Context Length    → valeur max (ex. 32768 ou 131072)
+Temperature       → 0.7
+Top P             → 0.8
+Top K             → 20
+Min P             → 0.0
+Presence Penalty  → 1.5
+Repeat Penalty    → 1.0
+Thinking          → désactivé (non-thinking)
+```
+
+Ces paramètres sont à fixer avant le benchmark pour garantir la reproductibilité des runs.
+
+### Références
+
+- [Unsloth — Qwen3.5 inference guide](https://unsloth.ai/docs/models/qwen3.5)
+- [LM Studio REST API](https://lmstudio.ai/docs/developer/rest)
+- Chen et al. (2021), *Evaluating Large Language Models Trained on Code* (HumanEval)
+- Austin et al. (2021), *Program Synthesis with Large Language Models*
