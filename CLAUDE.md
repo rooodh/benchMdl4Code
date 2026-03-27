@@ -138,6 +138,17 @@ cd results/runs/<run>/workspace && python main.py &
 ./validators/recipe-book.sh results/runs/<run>/workspace 8000
 ```
 
+## Principes de développement
+
+Les principes généraux (mode plan, sous-agents, auto-amélioration, élégance, correction autonome) sont définis dans `~/.claude/CLAUDE.md` et s'appliquent ici.
+
+### Spécifique à ce projet
+
+- **Ne pas modifier les résultats passés** : les fichiers dans `results/` sont des archives immuables — ne jamais les éditer après coup
+- **Tester sur un seul modèle** avant de lancer un benchmark complet
+- **Vérifier les paramètres** avant chaque run (modèle, prompt, max-turns/max-time cohérents)
+- **Leçons** : documenter les patterns d'erreurs dans `lessons.md` à la racine du projet
+
 ## Contrôle de sécurité — avant tout commit
 
 - Ne jamais committer de credentials, tokens ou secrets

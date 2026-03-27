@@ -1,4 +1,6 @@
-# Task : [titre court]
+# Task NNN : [titre court]
+
+**Modèle recommandé :** <!-- opus / sonnet / haiku -->
 
 ## Contexte
 
@@ -19,6 +21,10 @@
 ## Plan technique
 
 > Description courte de l'approche choisie, les décisions clés.
+
+1. Étape 1
+2. Étape 2
+3. Étape 3
 
 ## Todo
 
